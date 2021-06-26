@@ -422,24 +422,19 @@ class RevBinPkg(BaseFBAPkg):
 
 # The base class for FBA packages is inherited
 class SimpleThermoPkg(RevBinPkg):
-    def __init__(self, model, object, thermo_reactions, thermo_compounds, view_errors = True):
+    def __init__(self, model, thermo_compounds, view_errors = True):
         '''Redefining the inherited __init__ function
         'model' (COBRA object): The COBRApy FBA model
         'object' (COBRA object): The COBRA reaction\metabolite, or other entity, that should be constrained
-        'thermo_reactions' (Python object, dictionary): The thermodynamic dataset for the model reactions
         'thermo_compounds' (Python object, dictionary): The thermodynamic dataset for the model compounds
-
         '''                               
         # execute the parent __init__ and arbitrarily assign potentials to each metabolite 
         BaseFBAPkg.__init__(self, model = model, name = "simple thermo", variable_types = {"potential":"metabolite", "revbin":"reaction"}, constraint_types = {"simple_thermo":"reaction"})
         
         # inherit the RevBinPkg variables and constraints
         BaseFBAPkg.add_variables_and_constraints(self, variable_types = {"revbin":"reaction", "forv":"reaction", "revv":"reaction"}, constraint_types = {"revbinF":"reaction", "revbinR":"reaction"})
-        if object.id not in self.variables['revbin']:
-            BaseFBAPkg.build_variable(self, kind = "revbin", lower_bound = 0, upper_bound = 1, vartype = "binary", object = object, view_errors = view_errors, object_type = 'reaction')
         
         # store the thermodynamic data of the model
-        self.thermo_reactions = thermo_reactions        
         self.thermo_compounds = thermo_compounds
             
             
@@ -450,6 +445,9 @@ class SimpleThermoPkg(RevBinPkg):
         '''
         from optlang.symbolics import Zero
         import re
+            
+        if object.id not in self.variables['revbin']:
+            BaseFBAPkg.build_variable(self, kind = "revbin", lower_bound = 0, upper_bound = 1, vartype = "binary", object = object, view_errors = view_errors, object_type = 'reaction')
             
         if object_type == 'reaction':
             if object.reversibility:
@@ -464,7 +462,6 @@ class SimpleThermoPkg(RevBinPkg):
             self.constraints[constraint.name] = constraint.expression'''
         
         BaseFBAPkg.build_variable(self, kind = kind, lower_bound = 0, upper_bound = 1000, vartype = "continuous", view_errors = view_errors, object = object)
-        
         
         constraint_name = '{}_simple_thermo'.format(object.id)
         coef = {}
@@ -510,7 +507,8 @@ class SimpleThermoPkg(RevBinPkg):
                 
             BaseFBAPkg.build_constraint(self, constraint_expression = Zero, kind = "simple_thermo", lower_bound = 0, upper_bound = 1000, coef = coef, object = reaction, view_errors = view_errors, object_type = 'reaction')
             
-        print('Quantity of errors: ', errors_quantity)
+        if not view_errors:
+            print('Quantity of errors: ', errors_quantity)
                 
                 
 # ------------------------------------------ Full Thermo package ------------------------------------------
@@ -626,3 +624,6 @@ class FullThermoPkg(SimpleThermoPkg):
             # Unfiltered reactions are constructed through the aforementioned functions
             if reaction.id not in filter:
                 self.build_constraint(object = reaction, thermo_compounds = thermo_compounds, view_errors = view_errors, thermodynamics_data_type = 'dictionary')
+                
+        if not view_errors:
+            print('Quantity of errors: ', errors_quantity)
