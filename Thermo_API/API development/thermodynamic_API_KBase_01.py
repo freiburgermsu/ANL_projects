@@ -19,14 +19,12 @@ class FeasibilityError(Exception):
 class BaseFBAPkg:
     def __init__(self, model, name, variable_types = {'concentration': 'float', 'lnconc': 'float'}, constraint_types = {'concentration': 'float'}, parent=None):
         '''Intantiate the model
-        'model' (COBRA obj): The COBRApy model obj
+        'model' (COBRA or kbase obj): The genome-scale model obj
         'name' (Python obj, string): The name of the model
         'variable_types' (Python obj, dictionary): The types and variables examples for the model variables
         'constraint_types' (Python obj, dictionary): The names and values of the model constraints
         'parent' (Python obj, boolean): The categorical description of the model 
-        '''
-        import re
-        
+        '''        
         self.model = model
         self.name = name
         self.childpkgs = dict()
@@ -34,43 +32,9 @@ class BaseFBAPkg:
         self.variables = dict()
         self.parameters = dict()
         self.variable_types = variable_types
-        self.constraint_types = constraint_types    
-        self.thermo_compounds = {}   
+        self.constraint_types = constraint_types 
         
         BaseFBAPkg.add_variables_and_constraints(self, variable_types = variable_types, constraint_types = constraint_types)
-
-        from scipy.constants import calorie
-        import pandas
-        import re
-
-        #import modelseedpy      
-        #modelseed_path = '..\..\..\Biofilm growth code\GSWL code\ModelSEEDDatabase'
-        #modelseed = modelseedpy.biochem.from_local(modelseed_path)
-        
-        
-    def stoichiometry_data(self, obj, view_errors = True, obj_type = 'reaction'):
-        ''' Introduce the requisite stoichiometric data to the self instance data
-        'obj' (COBRA obj): The name of a COBRA reaction or metabolite, although, the former is the essential intention of the API  
-        'obj_type' (Python obj, string): A description of the COBRA obj, which is used to apply the pertinent code for the passed obj
-        '''
-        import re
-        
-        # expand the thermodynamic data from the obj argument 
-        undescribed_compounds = []
-        if obj_type == 'reaction':
-            for metabolite in obj.metabolites:
-                try:
-                    tmfa_name = re.sub('(?i)(_[a-z]$)', '', metabolite.id)
-                    self.thermo_compounds[tmfa_name]['stoichiometry'] = obj.metabolites[metabolite]
-                    
-                except:
-                    undescribed_compounds.append(tmfa_name)
-                    if view_errors:
-                        print('ERROR: The metabolite {} is unrepresented in the thermodynamic database.'. format(tmfa_name))  
-        else:
-            print('ERROR: The obj_type is not compatible with this API.')
-            
-        return undescribed_compounds
         
         
     def add_variables_and_constraints(self, variables = {}, variable_types = {}, constraints = {}, constraint_types = {}):
@@ -191,6 +155,7 @@ class BaseFBAPkg:
             self.constraints[kind][name] = self.model.problem.Constraint(expression = Zero, lb = lower_bound, ub = upper_bound, name = constraint_name)
             self.model.add_cons_vars(self.constraints[kind][name])
             self.model.solver.update()
+            print(coef)
             if len(coef) > 0:
                 self.constraints[kind][name].set_linear_coefficients(coef)
                 
@@ -227,14 +192,18 @@ class BaseFBAPkg:
         return consts
     
     
-    def revert_to_original(self, cobra_model_path):
-        '''Remove changed components of the COBRA model
+    def revert_to_original(self, cobra_model_path = None, kbase = None, kbase_model_id = 'E_iAH991V2', workspace_id = 93832):
+        '''Remove alterations of the genomen-scale model
         'model_path' (Python obj, string): The path string of the COBRA model
+        Note - either the < cobra_model_path > argument or the < kbase_model_id > and the < workspace_id > arguments must be passed
         '''               
         global model
-        # remove added variables and constants from the model by re-uploading the COBRA model  
-        model = cobra.io.load_json_model(cobra_model_path)
         
+        if cobra_model_path != None:
+            model = cobra.io.load_json_model(cobra_model_path)
+        elif cobra_model_path == None:
+            model = kbase.get_from_ws(kbase_model_id, workspace_id)
+            
         return model
     
 
@@ -317,7 +286,7 @@ class RevBinPkg(BaseFBAPkg):
 
 # The base class for FBA packages is inherited
 class SimpleThermoPkg(RevBinPkg):
-    def __init__(self, model, thermo_compounds, view_errors = True):
+    def __init__(self, model, view_errors = True):
         '''Redefining the inherited __init__ function
         'model' (COBRA obj): The COBRApy FBA model
         'obj' (COBRA obj): The COBRA reaction\metabolite, or other entity, that should be constrained
@@ -328,9 +297,6 @@ class SimpleThermoPkg(RevBinPkg):
         
         # inherit the RevBinPkg variables and constraints
         BaseFBAPkg.add_variables_and_constraints(self, variable_types = {"revbin":"reaction", "forv":"reaction", "revv":"reaction"}, constraint_types = {"revbinF":"reaction", "revbinR":"reaction"})
-        
-        # store the thermodynamic data of the model
-        self.thermo_compounds = thermo_compounds
             
             
     def build_constraint(self, obj, obj_type = 'reaction', view_errors = True, errors_quantity = 0, kind = 'simple_thermo'):
@@ -386,7 +352,7 @@ class SimpleThermoPkg(RevBinPkg):
         
         # create thermodynamic constraints and the associated variables
         for reaction in self.model.reactions:   
-            errors_quantity = self.build_constraint(obj = reaction, kind = "simple_thermo", obj_type = 'reaction', view_errors = view_errors, errors_quantity = errors_quantity)
+            errors_quantity = SimpleThermoPkg.build_constraint(self, obj = reaction, kind = "simple_thermo", obj_type = 'reaction', view_errors = view_errors, errors_quantity = errors_quantity)
             
         if not view_errors:
             print('Quantity of errors: ', errors_quantity)
@@ -409,8 +375,8 @@ class FullThermoPkg(SimpleThermoPkg):
         BaseFBAPkg.__init__(self, model = model, name = "full_thermo", variable_types = {}, constraint_types = {'concentration_potential': 'metabolite', 'electrochemical_potential':'metabolite', 'full_thermo': 'metabolite'})    
         
         # inherit the RevBinPkg variables and constraints
-        previous_variables = {"revbin":"reaction", "forv":"reaction", "revv":"reaction", 'ln_concentration': 'metabolite'}
-        previous_constraints = {"revbinF":"reaction", "revbinR":"reaction"}
+        previous_variables = {"revbin":"reaction", "forv":"reaction", "revv":"reaction", 'ln_concentration': 'metabolite', 'potential':'metabolite'}
+        previous_constraints = {"revbinF":"reaction", "revbinR":"reaction", 'simple_thermo':'reaction'}
         BaseFBAPkg.add_variables_and_constraints(self, variable_types = previous_variables, constraint_types = previous_constraints)
         
         # parameterize the initial chemical concentrations 
@@ -420,15 +386,17 @@ class FullThermoPkg(SimpleThermoPkg):
         
         self.validate_parameters(params = self.parameters, required = [], defaults = {
             "default_conc_range": [0.001, 20],  # an arbitrary range
-            "custom_concentration_constraints": {"glc-D": [10,10],  #cpd00027,  
+            "custom_concentration_constraints": {"glc__D": [10,10],  #cpd00027,  
                                                 'co2': [20, 24], #cpd00011, as bicarbonate, E. B. Brown and Richard L. Clancy, 1964
                                                 'h': [0.0053, 0.0053], #cpd00067, Battaglia, Hellegers, & Seeds, 1965
                                                 'o2': [0.672, 0.672] #cpd00007, 0.3 mL / dL serum O2 concentration
                                                  },
             'compartment_charge': {'c': 2, # arbitrary value
-                                   'e': 0 # by defintion of a zero ph gradient between the metabolite compartment and the extracellular compartment
+                                   'c0': 2, # arbitrary value
+                                   'e': 0, # by defintion of a zero ph gradient between the metabolite compartment and the extracellular compartment
+                                   'e0': 0 # by defintion of a zero ph gradient between the metabolite compartment and the extracellular compartment
                                   },
-            'activity_coefficient': {"glc-D": 0.94,  # arbitrary value 
+            'activity_coefficient': {"glc__D": 0.94,  # arbitrary value 
                                     'co2': 0.9, # arbitrary value
                                     'h': 0.98, # arbitrary value
                                     'o2': 0.95 # arbitrary value
@@ -450,40 +418,30 @@ class FullThermoPkg(SimpleThermoPkg):
         from numpy import log as ln 
         import re
         F = physical_constants['Faraday constant'][0]
-
-        # determine stoichiometric values from the specified dataset
-        if self.thermo_data_type == 'dictionary':
-            undescribed_compounds = BaseFBAPkg.stoichiometry_data(self, view_errors = view_errors, obj = obj, obj_type = 'reaction')
         
         # calculate the total energy of a reaction based upon the potentials for each metabolite               
         tmfa_name = ''
-        if obj_type == 'reaction' and self.thermo_data_type == 'dictionary':
-            for metabolite in obj.metabolites:
-                tmfa_name = re.sub('(?i)(_[a-z]$)', '', metabolite.id)
-                if tmfa_name not in undescribed_compounds:          
-                    
-                    # determine the concentration parameters for the metabolite
-                    if tmfa_name not in self.parameters['custom_concentration_constraints']:
-                        activity_coefficient = 1
-                        concentrations = self.parameters['default_conc_range']                        
-                        #sum(ln(conc) for conc in concentrations) / len(concentration_range)
-                    elif tmfa_name in self.parameters['custom_concentration_constraints']:
-                        activity_coefficient = self.parameters['activity_coefficient'][tmfa_name]
-                        concentrations = self.parameters['custom_concentration_constraints'][tmfa_name]
-                        
-                    # calculate the concentration potential for the metabolite
-                    errors_quantity, self.variables['ln_concentration'][metabolite.id] = BaseFBAPkg.build_variable(self, kind = "ln_concentration", lower_bound = concentrations[0], upper_bound = concentrations[1], vartype = "continuous", obj = metabolite, view_errors = view_errors, errors_quantity = errors_quantity, obj_type = 'metabolite')
-                    
-                    self.parameters['concentration_potential'][metabolite.id] = self.thermo_compounds[tmfa_name]['stoichiometry'] * self.variables['ln_concentration'][metabolite.id] * ln(activity_coefficient)
-                    
-                    coef[self.variables['ln_concentration'][metabolite.id]] = self.thermo_compounds[tmfa_name]['stoichiometry'] * ln(activity_coefficient)
+        for metabolite in obj.metabolites:
+            tmfa_name = re.sub('(?i)(_[a-z]$)', '', metabolite.id)
 
-                    # calculate the electrochemical potential term
-                    psi_electro_potential = 33.33 * self.parameters['compartment_charge'][metabolite.compartment] - 143.33  # millivolts, equation 9 from the TMFA paper 
-                    self.parameters['electro_potential'][metabolite.id] = psi_electro_potential * F * self.thermo_compounds[tmfa_name]['charge'] * kilo
-            
-        return undescribed_compounds
-            
+            # determine the concentration parameters for the metabolite
+            if tmfa_name not in self.parameters['custom_concentration_constraints']:
+                activity_coefficient = 1
+                concentrations = self.parameters['default_conc_range']                        
+                #sum(ln(conc) for conc in concentrations) / len(concentration_range)
+            elif tmfa_name in self.parameters['custom_concentration_constraints']:
+                activity_coefficient = ln(self.parameters['activity_coefficient'][tmfa_name])
+                concentrations = self.parameters['custom_concentration_constraints'][tmfa_name]
+
+            # calculate the concentration potential for the metabolite
+            errors_quantity, self.variables['ln_concentration'][metabolite.id] = BaseFBAPkg.build_variable(self, kind = "ln_concentration", lower_bound = concentrations[0], upper_bound = concentrations[1], vartype = "continuous", obj = metabolite, view_errors = view_errors, errors_quantity = errors_quantity, obj_type = 'metabolite')
+            self.parameters['concentration_potential'][metabolite.id] = obj.metabolites[metabolite] * self.variables['ln_concentration'][metabolite.id] * activity_coefficient
+            coef[self.variables['ln_concentration'][metabolite.id]] = obj.metabolites[metabolite] * activity_coefficient
+
+            # calculate the electrochemical potential term
+            psi_electro_potential = 33.33 * self.parameters['compartment_charge'][metabolite.compartment] - 143.33  # millivolts, equation 9 from the TMFA paper 
+            self.parameters['electro_potential'][metabolite.id] = psi_electro_potential * F * metabolite.charge * kilo
+
     
     def build_constraint(self, obj, filter = 'default_constraints', coef = {}, view_errors = True, errors_quantity = 0, obj_type = 'reaction'): #, modelseed = modelseed):
         '''Build constraints through the inherited function and the calculated variable coeffiients 
@@ -496,28 +454,31 @@ class FullThermoPkg(SimpleThermoPkg):
         import re
         
         if obj_type == 'reaction':
-            constant = 20 # arbitrary
+            self.build_data(view_errors = view_errors, coef = coef, obj = obj, obj_type = obj_type, errors_quantity = errors_quantity) 
+            
             if filter == 'default_constraints':
                 filter = self.model.constraints
+
+            constant = 1000 # arbitrary
             constraint_name = '{}_full_thermo'.format(obj.id)
             if constraint_name not in filter:
-                undescribed_compounds = self.build_data(view_errors = view_errors, coef = coef, obj = obj, obj_type = obj_type, errors_quantity = errors_quantity) 
-
+                
                 # calculate the potential components for the constraint expression calculation   
                 temperature = 25 # degrees kelvin  
                 if self.thermo_data_type == 'dictionary':
                     for metabolite in obj.metabolites:
-                        tmfa_name = re.sub('(?i)(_[a-z]$)', '', metabolite.id)
-                        if tmfa_name not in undescribed_compounds:
-                            delta_g = self.thermo_compounds[tmfa_name]['gibbs']    
-                            electro_potential = self.parameters['electro_potential'][metabolite.id]
-                            concentration_potential = self.parameters['concentration_potential'][metabolite.id]            
-
-                            self.parameters['total_energy'][metabolite.id] = delta_g + R * temperature * concentration_potential + electro_potential       
-
-                        else:
-                            if view_errors:
-                                print('ERROR: The {} compound is not described in the data, thus, the variable was not created.'.format(tmfa_name))
+                        if self.thermo_data_type == 'dictionary':
+                            tmfa_name = re.sub('(?i)(_[a-z]$)', '', metabolite.id) 
+                            try:
+                                delta_g = self.thermo_compounds[tmfa_name]['gibbs']   
+                            except:
+                                delta_g = 0
+                                if view_errors:
+                                    print('ERROR: The {} metabolite is undescribed by the {} dataset'.format(metabolite.id, self.thermo_data_type))
+                                    
+                        electro_potential = self.parameters['electro_potential'][metabolite.id]
+                        concentration_potential = self.parameters['concentration_potential'][metabolite.id]            
+                        self.parameters['total_energy'][metabolite.id] = delta_g + R * temperature * concentration_potential + electro_potential       
 
                 constraint_names = ['{}_revbinR'.format(obj.id), '{}_revbinF'.format(obj.id)]
                 if any(constraint not in self.model.constraints for constraint in constraint_names):
@@ -529,7 +490,6 @@ class FullThermoPkg(SimpleThermoPkg):
                 built_constraint = None
                 obj.upper_bound = obj.lower_bound = constant
                 print('The {} contraint is updated in the model: {}'.format(constraint_name, self.model.constraints[constraint_name], obj.upper_bound, obj.lower_bound))
-                
                 if view_errors:
                     print('ERROR: The {}_full_thermo constraint already exists in the model.'.format(obj.id))
             
@@ -548,6 +508,9 @@ class FullThermoPkg(SimpleThermoPkg):
         '''           
         from optlang.symbolics import Zero
         import re
+        
+        # create the potential variables from the Simple Thermo Package
+        SimpleThermoPkg.build_package(self)
 
         # create thermodynamic constraints and the associated variables
         for reaction in self.model.reactions: 
