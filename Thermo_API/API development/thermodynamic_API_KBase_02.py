@@ -341,6 +341,14 @@ class SimpleThermoPkg(RevBinPkg):
                             if view_errors:
                                 print('ERROR: The {} metabolite is undescribed by the {} dataset'.format(metabolite.id, self.thermo_data_type))
                                 
+                    elif self.thermo_data_type == 'kbase':
+                        try:
+                            delta_g = self.thermo_compounds[metabolite.id]['gibbs (KJ/mol)']   
+                        except:
+                            delta_g = 0
+                            if view_errors:
+                                print('ERROR: The {} metabolite is undescribed by the {} dataset'.format(metabolite.id, self.thermo_data_type))
+                                
                     # the potential variable coefficient is defined
                     stoichiometry = obj.metabolites[metabolite]
                     coef[self.variables["potential"][metabolite.id]] = stoichiometry * delta_g
@@ -477,6 +485,14 @@ class FullThermoPkg(SimpleThermoPkg):
                 if view_errors:
                     print('ERROR: The {} metabolite is undescribed by the {} dataset'.format(metabolite_obj.id, self.thermo_data_type))
                     
+        elif self.thermo_data_type == 'kbase':
+            try:
+                delta_g = self.thermo_compounds[metabolite_obj.id]['gibbs (KJ/mol)']   
+            except:
+                delta_g = 0
+                if view_errors:
+                    print('ERROR: The {} metabolite is undescribed by the {} dataset'.format(metabolite_obj.id, self.thermo_data_type))
+                    
         # create the constraint
         constant = delta_g + self.parameters['electro_potential'][metabolite_obj.id]
         built_constraint = BaseFBAPkg.build_constraint(self, constraint_expression = Zero, kind = 'full_thermo', lower_bound = constant, upper_bound = constant, coef = coef, obj = metabolite_obj, view_errors = view_errors, obj_type = 'metabolite')
@@ -494,7 +510,12 @@ class FullThermoPkg(SimpleThermoPkg):
 
         # create thermodynamic constraints and the associated variables
         for metabolite in self.model.metabolites: 
-            compartment_potential = electro_compartment_potential_dict[metabolite.compartment]
+            if self.thermo_data_type == 'dictionary':
+                compartment = metabolite.compartment
+                compartment_potential = electro_compartment_potential_dict[compartment]
+            elif self.thermo_data_type == 'kbase':
+                compartment = re.sub('([0-9])', '', metabolite.compartment)
+                compartment_potential = electro_compartment_potential_dict[compartment]
             self.build_constraint(metabolite_obj = metabolite, coef = {}, psi_electro_compartment_potential = compartment_potential, view_errors = view_errors, errors_quantity = errors_quantity)
             
         if not view_errors:
