@@ -118,7 +118,6 @@ class FullThermoPkg(BaseFBAPkg):
             return BaseFBAPkg.build_variable(self,"dgerr",-1*ub,ub,"continuous",object)
         
         elif type == 'dgbin':
-            # 1000 * revbin(i) + revv(i) <= 1000
             return BaseFBAPkg.build_variable(self,"dgbin",0,1,"binary",object)
             
 
